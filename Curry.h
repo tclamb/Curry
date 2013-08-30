@@ -96,9 +96,27 @@ auto curry(R(*f)(A...))
 
 /* UNCURRY */
 
+namespace
+{
+    template<typename T> struct uncurry_t {};
+
+    template<typename R, typename... A>
+    struct uncurry_t<std::function<R(A...)>>
+    {
+        using type = std::function<R(A...)>;
+    };
+
+    template<typename R, typename... Head, typename Tail>
+    struct uncurry_t<std::function<std::function<R(Tail)>(Head...)>>
+    {
+        using type = typename uncurry_t<std::function<R(Head..., Tail)>>::type;
+    };
+}
+
 /* forward declaration of where the magic happens */
 template<typename R, typename... Head, typename Tail>
-auto uncurry(std::function<std::function<R(Tail)>(Head...)> f);
+auto uncurry(std::function<std::function<R(Tail)>(Head...)> f)
+-> typename uncurry_t<std::function<std::function<R(Tail)>(Head...)>>::type;
 
 /* specialization for lambda functions and other functors */
 template<typename F>
@@ -118,7 +136,8 @@ std::function<R(A...)> uncurry(std::function<R(A...)> f) {
 }
 
 template<typename R, typename... Head, typename Tail>
-auto uncurry(std::function<std::function<R(Tail)>(Head...)> f) {
+auto uncurry(std::function<std::function<R(Tail)>(Head...)> f)
+-> typename uncurry_t<std::function<std::function<R(Tail)>(Head...)>>::type {
     return uncurry(std::function<R(Head..., Tail)>{
         [f](Head... h, Tail t) {
             return f(h...)(t);

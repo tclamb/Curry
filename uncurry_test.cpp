@@ -1,7 +1,8 @@
 #include <iostream>
 #include "Curry.h"
 
-auto six(int f) {
+auto six(int f)
+-> std::function<std::function<std::function<std::function<std::function<int(int)>(int)>(int)>(int)>(int)> {
     return curry([f](int a, int b, int c, int d, int e){
         return a + b + c - d - e - f;
     });
