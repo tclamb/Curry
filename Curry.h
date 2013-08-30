@@ -94,4 +94,42 @@ auto curry(R(*f)(A...))
     return curry(std::function<R(A...)>(f));
 }
 
+/* UNCURRY */
+
+/* forward declaration of where the magic happens */
+template<typename R, typename... Head, typename Tail>
+auto uncurry(std::function<std::function<R(Tail)>(Head...)> f);
+
+/* specialization for lambda functions and other functors */
+template<typename F>
+auto uncurry(F f)
+-> decltype(uncurry(std::function<typename remove_class<
+    decltype(&std::remove_reference<F>::type::operator())
+    >::type>(f))) {
+    return uncurry(std::function<typename remove_class<
+            decltype(&std::remove_reference<F>::type::operator())
+            >::type>(f));
+}
+
+/* gotta stop the madness */
+template<typename R, typename... A>
+std::function<R(A...)> uncurry(std::function<R(A...)> f) {
+    return f;
+}
+
+template<typename R, typename... Head, typename Tail>
+auto uncurry(std::function<std::function<R(Tail)>(Head...)> f) {
+    return uncurry(std::function<R(Head..., Tail)>{
+        [f](Head... h, Tail t) {
+            return f(h...)(t);
+        }});
+}
+
+/* specialization for function pointers */
+template<typename R, typename... A>
+auto uncurry(R(*f)(A...))
+-> decltype(uncurry(std::function<R(A...)>(f))) {
+    return uncurry(std::function<R(A...)>(f));
+}
+
 #endif
