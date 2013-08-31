@@ -26,18 +26,25 @@ namespace
         using type = std::function<R(A)>;
     };
 
-    template<typename R, typename Head, typename Tail>
-    struct curry_t<R(Head, Tail)>
+    template<typename R, typename Head, typename... Tail>
+    struct curry_t<R(Head, Tail...)>
     {
-        using type = std::function<std::function<R(Tail)>(Head)>;
+        using type = std::function<typename curry_t<R(Tail...)>::type(Head)>;
     };
+}
 
-    template<typename R, typename Head, typename Body, typename... Tail>
-    struct curry_t<R(Head, Body, Tail...)>
-    {
-        using type = std::function<
-            std::function<typename curry_t<R(Tail...)>::type (Body)>(Head)
-            >;
+/* slip on one layer at a time */
+template<typename R, typename Head, typename Body, typename... Tail>
+auto curry(std::function<R(Head, Body, Tail...)> f)
+-> typename curry_t<R(Head, Body, Tail...)>::type {
+    return [f](Head&& h) {
+        return curry(
+            std::function<R(Body, Tail...)>{
+                [f, h](Body b, Tail... t) {
+                    return f(h, b, t...);
+                }
+            }
+        );
     };
 }
 
@@ -51,11 +58,6 @@ namespace
         struct remove_class<R(C::*)(A...) const> { using type = R(A...); };
 }
 
-/* forward declaration of where the magic happens */
-template<typename R, typename Head, typename Body, typename... Tail>
-auto curry(std::function<R(Head, Body, Tail...)> f)
--> typename curry_t<R(Head, Body, Tail...)>::type;
-
 /* specialization for lambda functions and other functors */
 template<typename F>
 auto curry(F f) 
@@ -67,24 +69,12 @@ auto curry(F f)
             >::type>(f));
 }
 
-template<typename R, typename Head, typename Body, typename... Tail>
-auto curry(std::function<R(Head, Body, Tail...)> f)
--> typename curry_t<R(Head, Body, Tail...)>::type {
-    return [f](Head&& h) {
-        return curry([f, h](Body b, Tail... t) {
-            return f(h, b, t...);
-        });
-    };
-}
-
 /* specialization for function pointers */
 template<typename R, typename... A>
 auto curry(R(*f)(A...))
 -> decltype(curry(std::function<R(A...)>(f))) {
     return curry(std::function<R(A...)>(f));
 }
-
-/* UNCURRY */
 
 namespace
 {
@@ -103,10 +93,24 @@ namespace
     };
 }
 
-/* forward declaration of where the magic happens */
+/* terminate recursion when return type is not a function */
+template<typename R, typename... A>
+std::function<R(A...)> uncurry(std::function<R(A...)> f) {
+    return f;
+}
+
+/* peel off one layer at a time */
 template<typename R, typename... Head, typename Tail>
 auto uncurry(std::function<std::function<R(Tail)>(Head...)> f)
--> typename uncurry_t<std::function<std::function<R(Tail)>(Head...)>>::type;
+-> typename uncurry_t<std::function<std::function<R(Tail)>(Head...)>>::type {
+    return uncurry(
+        std::function<R(Head..., Tail)>{
+            [f](Head... h, Tail t) {
+                return f(h...)(t);
+            }
+        }
+    );
+}
 
 /* specialization for lambda functions and other functors */
 template<typename F>
@@ -117,21 +121,6 @@ auto uncurry(F f)
     return uncurry(std::function<typename remove_class<
             decltype(&std::remove_reference<F>::type::operator())
             >::type>(f));
-}
-
-/* gotta stop the madness */
-template<typename R, typename... A>
-std::function<R(A...)> uncurry(std::function<R(A...)> f) {
-    return f;
-}
-
-template<typename R, typename... Head, typename Tail>
-auto uncurry(std::function<std::function<R(Tail)>(Head...)> f)
--> typename uncurry_t<std::function<std::function<R(Tail)>(Head...)>>::type {
-    return uncurry(std::function<R(Head..., Tail)>{
-        [f](Head... h, Tail t) {
-            return f(h...)(t);
-        }});
 }
 
 /* specialization for function pointers */
