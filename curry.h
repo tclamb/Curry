@@ -2,7 +2,6 @@
 #define _Curry_curry_h_
 
 #include <functional>
-#include <type_traits>
 
 /* specialization for zero argument functions */
 template<typename R>
