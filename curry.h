@@ -3,20 +3,9 @@
 
 #include <functional>
 
-/* specialization for zero argument functions */
-template<typename R>
-std::function<R()> curry(std::function<R()> f) {
-    return f;
-}
-
-/* specialization for single argument functions */
-template<typename R, typename A>
-std::function<R(A)> curry(std::function<R(A)> f) {
-    return f;
-}
-
 namespace
 {
+    /* SFNIAE helper struct for determining return type of curry */
     template<typename T> struct curry_t {};
 
     template<typename R, typename A>
@@ -32,6 +21,12 @@ namespace
     };
 }
 
+/* terminate recursion when passed a single-argument function */
+template<typename R, typename A>
+std::function<R(A)> curry(std::function<R(A)> f) {
+    return f;
+}
+
 /* slip on one layer at a time */
 template<typename R, typename Head, typename Body, typename... Tail>
 auto curry(std::function<R(Head, Body, Tail...)> f)
@@ -45,6 +40,19 @@ auto curry(std::function<R(Head, Body, Tail...)> f)
             }
         );
     };
+}
+
+/* specialization for zero argument functions */
+template<typename R>
+std::function<R()> curry(std::function<R()> f) {
+    return f;
+}
+
+/* specialization for function pointers */
+template<typename R, typename... A>
+auto curry(R(*f)(A...))
+-> decltype(curry(std::function<R(A...)>(f))) {
+    return curry(std::function<R(A...)>(f));
 }
 
 namespace
@@ -68,15 +76,9 @@ auto curry(F f)
             >::type>(f));
 }
 
-/* specialization for function pointers */
-template<typename R, typename... A>
-auto curry(R(*f)(A...))
--> decltype(curry(std::function<R(A...)>(f))) {
-    return curry(std::function<R(A...)>(f));
-}
-
 namespace
 {
+    /* SFINAE helper struct for determining return type of uncurry */
     template<typename T> struct uncurry_t {};
 
     template<typename R, typename... A>
@@ -111,6 +113,13 @@ auto uncurry(std::function<std::function<R(Tail)>(Head...)> f)
     );
 }
 
+/* specialization for function pointers */
+template<typename R, typename... A>
+auto uncurry(R(*f)(A...))
+-> decltype(uncurry(std::function<R(A...)>(f))) {
+    return uncurry(std::function<R(A...)>(f));
+}
+
 /* specialization for lambda functions and other functors */
 template<typename F>
 auto uncurry(F f)
@@ -120,13 +129,6 @@ auto uncurry(F f)
     return uncurry(std::function<typename remove_class<
             decltype(&std::remove_reference<F>::type::operator())
             >::type>(f));
-}
-
-/* specialization for function pointers */
-template<typename R, typename... A>
-auto uncurry(R(*f)(A...))
--> decltype(uncurry(std::function<R(A...)>(f))) {
-    return uncurry(std::function<R(A...)>(f));
 }
 
 #endif
