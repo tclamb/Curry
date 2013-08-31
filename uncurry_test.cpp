@@ -1,5 +1,5 @@
 #include <iostream>
-#include "Curry.h"
+#include "curry.h"
 
 auto six(int f)
 -> std::function<std::function<std::function<std::function<std::function<int(int)>(int)>(int)>(int)>(int)> {

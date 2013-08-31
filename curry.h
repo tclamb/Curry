@@ -1,5 +1,5 @@
-#ifndef _Curry_Curry_h_
-#define _Curry_Curry_h_
+#ifndef _Curry_curry_h_
+#define _Curry_curry_h_
 
 #include <functional>
 #include <type_traits>
