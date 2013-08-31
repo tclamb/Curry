@@ -41,16 +41,6 @@ namespace
     };
 }
 
-template<typename R, typename Head, typename Tail>
-auto curry(std::function<R(Head, Tail)> f)
--> std::function<std::function<R(Tail)>(Head)> {
-    return [f](Head&& h) {
-        return [f, h](Tail&& t) {
-            return f(h, t);
-        };
-    };
-}
-
 namespace
 {
     /* SFNIAE helper struct for type extraction of lambdas */
