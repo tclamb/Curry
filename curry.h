@@ -2,6 +2,8 @@
 #define _Curry_curry_h_
 
 #include <functional>
+#include <tuple>
+#include "eval.h"
 
 namespace
 {
@@ -19,6 +21,75 @@ namespace
     {
         using type = std::function<typename curry_t<R(Tail...)>::type(Head)>;
     };
+
+    template <size_t... n>
+    struct ct_integers_list {
+        template <size_t m>
+        struct push_back
+        {
+            typedef ct_integers_list<n..., m> type;
+        };
+    };
+
+    template <size_t max>
+    struct ct_iota_1
+    {
+        typedef typename ct_iota_1<max-1>::type::template push_back<max>::type type;
+    };
+
+    template <>
+    struct ct_iota_1<0>
+    {
+        typedef ct_integers_list<> type;
+    };
+
+    template<typename Tuple, size_t... Indices>
+    struct tuple_subset
+    {
+        using type = std::tuple<typename std::tuple_element<Indices, Tuple>::type...>;
+    };
+
+    template<typename T, std::size_t N, typename> struct curry_f {};
+
+    template<typename R, typename... Args, std::size_t N>
+    struct curry_f<R(Args...), N, typename std::enable_if<N != sizeof...(Args), void>::type>
+    {
+        using ArgsTuple = std::tuple<Args...>;
+        constexpr static std::size_t nArgs = std::tuple_size<ArgsTuple>::value;
+        //using NextArg = typename std::tuple_element<N, ArgsTuple>::type;
+        using SoFarTuple = typename tuple_subset<ArgsTuple, typename ct_iota_1<N>::type{}>::type;
+
+        std::function<R(Args...)> f;
+        SoFarTuple SoFar;
+
+        template<typename NextArg>
+        curry_f<R(Args...), N+1, void> operator()(NextArg n) {
+            return {f, std::tuple_cat(SoFar, std::forward_as_tuple(n))};
+        }
+    };
+    
+    template<typename R, typename... Args, std::size_t N>
+    struct curry_f<R(Args...), N, typename std::enable_if<N == sizeof...(Args), void>::type>
+    {
+        using ArgsTuple = std::tuple<Args...>;
+        constexpr static std::size_t nArgs = std::tuple_size<ArgsTuple>::value;
+        //using NextArg = typename std::tuple_element<N, ArgsTuple>::type;
+        using SoFarTuple = typename tuple_subset<ArgsTuple, typename ct_iota_1<N>::type{}>::type;
+
+        std::function<R(Args...)> f;
+        SoFarTuple SoFar;
+
+        template<typename NextArg>
+        R operator()(NextArg n) {
+            return tuple_eval(f, std::tuple_cat(SoFar, std::forward_as_tuple(n)));
+        }
+    };
+}
+
+template<typename R, typename... Args>
+curry_f<R(Args...), sizeof...(Args), void>
+make_curried(std::function<R(Args...)> f) {
+    return {f, std::tie()};
 }
 
 /* terminate recursion when passed a single-argument function */
