@@ -27,37 +27,69 @@ namespace
         template <size_t m>
         struct push_back
         {
-            typedef ct_integers_list<n..., m> type;
+            using type = ct_integers_list<n..., m>;
         };
     };
 
     template <size_t max>
     struct ct_iota_1
     {
-        typedef typename ct_iota_1<max-1>::type::template push_back<max>::type type;
+        using type = typename ct_iota_1<max-1>::type::template push_back<max>::type;
     };
 
     template <>
     struct ct_iota_1<0>
     {
-        typedef ct_integers_list<> type;
+        using type = ct_integers_list<0>;
     };
 
+    template<typename T, typename U> struct tuple_subset {};
+
     template<typename Tuple, size_t... Indices>
-    struct tuple_subset
+    struct tuple_subset<Tuple, ct_integers_list<Indices...>>
     {
         using type = std::tuple<typename std::tuple_element<Indices, Tuple>::type...>;
     };
 
     template<typename T, std::size_t N, typename> struct curry_f {};
 
-    template<typename R, typename... Args, std::size_t N>
-    struct curry_f<R(Args...), N, typename std::enable_if<N != sizeof...(Args), void>::type>
+    template<typename R, typename... Args>
+    struct curry_f<R(Args...), 0, typename std::enable_if<1 == sizeof...(Args)>::type>
     {
         using ArgsTuple = std::tuple<Args...>;
         constexpr static std::size_t nArgs = std::tuple_size<ArgsTuple>::value;
         //using NextArg = typename std::tuple_element<N, ArgsTuple>::type;
-        using SoFarTuple = typename tuple_subset<ArgsTuple, typename ct_iota_1<N>::type{}>::type;
+
+        std::function<R(Args...)> f;
+
+        template<typename NextArg>
+        R operator()(NextArg n) {
+            return f(n);
+        }
+    };
+
+    template<typename R, typename... Args>
+    struct curry_f<R(Args...), 0, typename std::enable_if<1 < sizeof...(Args)>::type>
+    {
+        using ArgsTuple = std::tuple<Args...>;
+        constexpr static std::size_t nArgs = std::tuple_size<ArgsTuple>::value;
+        //using NextArg = typename std::tuple_element<N, ArgsTuple>::type;
+
+        std::function<R(Args...)> f;
+
+        template<typename NextArg>
+        curry_f<R(Args...), 1, void> operator()(NextArg n) {
+            return {f, std::forward_as_tuple(n)};
+        }
+    };
+
+    template<typename R, typename... Args, std::size_t N>
+    struct curry_f<R(Args...), N, typename std::enable_if<N+1 < sizeof...(Args) && N != 0>::type>
+    {
+        using ArgsTuple = std::tuple<Args...>;
+        constexpr static std::size_t nArgs = std::tuple_size<ArgsTuple>::value;
+        //using NextArg = typename std::tuple_element<N, ArgsTuple>::type;
+        using SoFarTuple = typename tuple_subset<ArgsTuple, typename ct_iota_1<N-1>::type>::type;
 
         std::function<R(Args...)> f;
         SoFarTuple SoFar;
@@ -69,12 +101,12 @@ namespace
     };
     
     template<typename R, typename... Args, std::size_t N>
-    struct curry_f<R(Args...), N, typename std::enable_if<N == sizeof...(Args), void>::type>
+    struct curry_f<R(Args...), N, typename std::enable_if<N+1 == sizeof...(Args) && N != 0>::type>
     {
         using ArgsTuple = std::tuple<Args...>;
         constexpr static std::size_t nArgs = std::tuple_size<ArgsTuple>::value;
         //using NextArg = typename std::tuple_element<N, ArgsTuple>::type;
-        using SoFarTuple = typename tuple_subset<ArgsTuple, typename ct_iota_1<N>::type{}>::type;
+        using SoFarTuple = typename tuple_subset<ArgsTuple, typename ct_iota_1<N-1>::type>::type;
 
         std::function<R(Args...)> f;
         SoFarTuple SoFar;
@@ -86,10 +118,14 @@ namespace
     };
 }
 
+template<typename R>
+std::function<R()> make_curried(std::function<R()> f) {
+    return f;
+}
+
 template<typename R, typename... Args>
-curry_f<R(Args...), sizeof...(Args), void>
-make_curried(std::function<R(Args...)> f) {
-    return {f, std::tie()};
+curry_f<R(Args...), 0, void> make_curried(std::function<R(Args...)> f) {
+    return {f};
 }
 
 /* terminate recursion when passed a single-argument function */
