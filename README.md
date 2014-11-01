@@ -1,6 +1,4 @@
-function currying and uncurrying for C++
-currently reimplementing using tuples for massive speed gains
-as is, not very practical
+function currying and uncurrying for C++14
 
 example usage:
 ```cpp
@@ -21,7 +19,7 @@ float scalar_triple_product(vec a, vec b, vec c) { return dot_product(a, cross_p
 
 int main() {
     auto curried_stp = curry(&scalar_triple_product);
-    auto x_of_cross_product = uncurry(curried_stp({1,0,0}));
+    auto x_of_cross_product = curried_stp({1,0,0});
 
     std::cout << "(1, 0, 0) dot (0, 1, 0) cross (0, 0, 1) = "
                   << "(1, 0, 0) dot (1, 0, 0) = "

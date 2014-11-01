@@ -1,134 +1,112 @@
-#ifndef _Curry_curry_h_
-#define _Curry_curry_h_
-
+#include <cstddef>
 #include <functional>
+#include <type_traits>
+#include <tuple>
+#include <utility>
 
-namespace
+template<typename Functor>
+auto curry(Functor&& f);
+
+namespace curry_impl
 {
-    /* SFNIAE helper struct for determining return type of curry */
-    template<typename T> struct curry_t {};
+    /* helper: typing using type = T; is tedious */
+    template<typename T> struct identity { using type = T; };
 
-    template<typename R, typename A>
-    struct curry_t<R(A)>
-    {
-        using type = std::function<R(A)>;
-    };
+    /* helper: SFINAE magic :) */
+    template<typename...> struct void_t_impl : identity<void> {};
+    template<typename... Ts> using void_t = typename void_t_impl<Ts...>::type;
 
-    template<typename R, typename Head, typename... Tail>
-    struct curry_t<R(Head, Tail...)>
-    {
-        using type = std::function<typename curry_t<R(Tail...)>::type(Head)>;
-    };
-}
+    /* helper: true iff F(Args...) is invokable */
+    template<typename Signature, typename = void> struct is_invokable                                                                    : std::false_type {};
+    template<typename F, typename... Args> struct is_invokable<F(Args...), void_t<decltype(std::declval<F>()(std::declval<Args>()...))>> : std::true_type  {};
 
-/* terminate recursion when passed a single-argument function */
-template<typename R, typename A>
-std::function<R(A)> curry(std::function<R(A)> f) {
-    return f;
-}
+    /* helper: unwraps references wrapped by std::ref() */
+    template<typename T> struct unwrap_reference                            : identity<T>  {};
+    template<typename T> struct unwrap_reference<std::reference_wrapper<T>> : identity<T&> {};
+    template<typename T> using unwrap_reference_t = typename unwrap_reference<T>::type;
 
-/* slip on one layer at a time */
-template<typename R, typename Head, typename Body, typename... Tail>
-auto curry(std::function<R(Head, Body, Tail...)> f)
--> typename curry_t<R(Head, Body, Tail...)>::type {
-    return [f](Head&& h) {
-        return curry(
-            std::function<R(Body, Tail...)>{
-                [f, h](Body b, Tail... t) {
-                    return f(h, b, t...);
-                }
-            }
-        );
-    };
-}
+    /* helper: same transformation as applied by std::make_tuple() *
+    *         decays to value type unless wrapped with std::ref() *
+    *    use: modeling value & reference captures                 *
+    *         e.g. c(a) vs c(std::ref(a))                         */
+    template<typename T> struct decay_reference : unwrap_reference<std::decay_t<T>> {};
+    template<typename T> using decay_reference_t = typename decay_reference<T>::type;
 
-/* specialization for zero argument functions */
-template<typename R>
-std::function<R()> curry(std::function<R()> f) {
-    return f;
-}
+    /* helper: true iff all template arguments are true */
+    template<bool...> struct all : std::true_type {};
+    template<bool... Booleans> struct all<false, Booleans...> : std::false_type {};
+    template<bool... Booleans> struct all<true, Booleans...> : all<Booleans...> {};
 
-/* specialization for function pointers */
-template<typename R, typename... A>
-auto curry(R(*f)(A...))
--> typename curry_t<R(A...)>::type {
-    return curry(std::function<R(A...)>{f});
-}
+    /* helper: std::move(u) iff T is not an lvalue                       *
+    *    use: save on copies when curry_t is an rvalue                  *
+    *         e.g. c(a)(b)(c) should only copy functor, a, b, etc. once */
+    template<bool = false> struct move_if_value_impl       { template<typename U> auto&& operator()(U&& u) { return std::move(u); } };
+    template<>             struct move_if_value_impl<true> { template<typename U> auto&  operator()(U&  u) { return u; } };
+    template<typename T, typename U> auto&& move_if_value(U&& u) { return move_if_value_impl<std::is_lvalue_reference<T>{}>{}(std::forward<U>(u)); }
 
-namespace
-{
-    /* SFNIAE helper struct for type extraction of lambdas */
-    template<typename T> struct remove_class {};
-    template<typename R, typename C, typename... A>
-        struct remove_class<R(C::*)(A...)> { using type = R(A...); };
-    template<typename R, typename C, typename... A>
-        struct remove_class<R(C::*)(A...) const> { using type = R(A...); };
-}
-
-/* specialization for lambda functions and other functors */
-template<typename F>
-auto curry(F f) 
--> typename curry_t<typename remove_class<
-    decltype(&std::remove_reference<F>::type::operator())
-    >::type>::type {
-    return curry(std::function<typename remove_class<
-            decltype(&std::remove_reference<F>::type::operator())
-            >::type>{f});
-}
-
-namespace
-{
-    /* SFINAE helper struct for determining return type of uncurry */
-    template<typename T> struct uncurry_t {};
-
-    template<typename R, typename... A>
-    struct uncurry_t<std::function<R(A...)>>
-    {
-        using type = std::function<R(A...)>;
-    };
-
-    template<typename R, typename... Head, typename Tail>
-    struct uncurry_t<std::function<std::function<R(Tail)>(Head...)>>
-    {
-        using type = typename uncurry_t<std::function<R(Head..., Tail)>>::type;
-    };
-}
-
-/* terminate recursion when return type is not a function */
-template<typename R, typename... A>
-std::function<R(A...)> uncurry(std::function<R(A...)> f) {
-    return f;
-}
-
-/* peel off one layer at a time */
-template<typename R, typename... Head, typename Tail>
-auto uncurry(std::function<std::function<R(Tail)>(Head...)> f)
--> typename uncurry_t<std::function<std::function<R(Tail)>(Head...)>>::type {
-    return uncurry(
-        std::function<R(Head..., Tail)>{
-            [f](Head... h, Tail t) {
-                return f(h...)(t);
-            }
+    /* the curry wrapper/functor */
+    template<typename Functor, typename... Captures>
+    struct curry_t {
+        /* unfortunately, ref qualifiers don't change *this (always lvalue),   *
+        * so qualifiers have to be on operator(),                             *
+        * even though only invoke_impl(std::false_type, ...) needs qualifiers */
+    #define OPERATOR_PARENTHESES(X, Y) \
+        template<typename... Args> \
+        auto operator()(Args&&... args) X { \
+            return invoke_impl_##Y(is_invokable<Functor(Captures..., Args...)>{}, std::index_sequence_for<Captures...>{}, std::forward<Args>(args)...); \
         }
-    );
+
+        OPERATOR_PARENTHESES(&,  lv)
+        OPERATOR_PARENTHESES(&&, rv)
+    #undef OPERATOR_PARENTHESES
+
+        Functor functor;
+        std::tuple<Captures...> captures;
+
+    private:
+        /* tag dispatch for when Functor(Captures..., Args...) is an invokable expression *
+        * see above comment about duplicate code                             */
+    #define INVOKE_IMPL_TRUE(X) \
+        template<typename... Args, std::size_t... Is> \
+        auto invoke_impl_##X(std::true_type, std::index_sequence<Is...>, Args&&... args) { \
+            return functor(std::get<Is>(captures)..., std::forward<Args>(args)...); \
+        }
+
+        INVOKE_IMPL_TRUE(lv)
+        INVOKE_IMPL_TRUE(rv)
+    #undef INVOKE_IMPL_TRUE
+
+        /* tag dispatch for when Functor(Capture..., Args...) is NOT an invokable expression *
+        * lvalue ref qualifier version copies all captured values/references     */
+        template<typename... Args, std::size_t... Is>
+        auto invoke_impl_lv(std::false_type, std::index_sequence<Is...>, Args&&... args) {
+            static_assert(all<std::is_copy_constructible<Functor>{}, std::is_copy_constructible<Captures>{}...>{}, "all captures must be copyable or curry_t must an rvalue");
+            return curry_t<Functor, Captures..., decay_reference_t<Args>...>{
+                functor,
+                std::tuple<Captures..., decay_reference_t<Args>...>{
+                    std::get<Is>(captures)...,
+                    std::forward<Args>(args)...
+                }
+            };
+        }
+
+        /* tag dispatch for when F(As..., Args...) is NOT an invokable expression        *
+        * rvalue ref qualifier version moves all captured values, copies all references */
+        template<typename... Args, std::size_t... Is>
+        auto invoke_impl_rv(std::false_type, std::index_sequence<Is...>, Args&&... args) {
+            return curry_t<Functor, Captures..., decay_reference_t<Args>...>{
+                move_if_value<Functor>(functor),
+                std::tuple<Captures..., decay_reference_t<Args>...>{
+                    move_if_value<Captures>(std::get<Is>(captures))...,
+                    std::forward<Args>(args)...
+                }
+            };
+        }
+    };
 }
 
-/* specialization for function pointers */
-template<typename R, typename... A>
-auto uncurry(R(*f)(A...))
--> typename uncurry_t<R(A...)>::type {
-    return uncurry(std::function<R(A...)>{f});
+/* helper function for creating curried functors */
+template<typename Functor>
+auto curry(Functor&& f) {
+    return curry_impl::curry_t<curry_impl::decay_reference_t<Functor>>{std::forward<Functor>(f), {}};
 }
-
-/* specialization for lambda functions and other functors */
-template<typename F>
-auto uncurry(F f)
--> typename uncurry_t<typename remove_class<
-    decltype(&std::remove_reference<F>::type::operator())
-    >::type>::type {
-    return uncurry(std::function<typename remove_class<
-            decltype(&std::remove_reference<F>::type::operator())
-            >::type>{f});
-}
-
-#endif
